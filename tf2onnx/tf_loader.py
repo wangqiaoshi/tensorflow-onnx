@@ -96,13 +96,14 @@ def inputs_without_resource(sess, input_names):
         pass
     return input_names
 
+
 def convert_variables_to_constants_large_model(func):
     # For large models we use internal tf methods as a hack
 
     if tf.__version__.startswith("2.2."):
         try:
             from tensorflow.python.framework.convert_to_constants import \
-                 _convert_variables_to_constants_v2_impl # pylint: disable=protected-access
+                 _convert_variables_to_constants_v2_impl  # pylint: disable=protected-access
         except ImportError:
             _not_implemented_tf_placeholder("_convert_variables_to_constants_v2_impl")()
         frozen_graph_def, _ = \
@@ -111,12 +112,13 @@ def convert_variables_to_constants_large_model(func):
 
     try:
         from tensorflow.python.framework.convert_to_constants import \
-            _FunctionConverterData, _replace_variables_by_constants # pylint: disable=protected-access
+            _FunctionConverterData, _replace_variables_by_constants  # pylint: disable=protected-access
     except ImportError:
         _not_implemented_tf_placeholder("_replace_variables_by_constants")()
     converter_data = _FunctionConverterData(func=func, lower_control_flow=False, aggressive_inlining=True)
     frozen_graph_def, _ = _replace_variables_by_constants(converter_data=converter_data)
     return frozen_graph_def
+
 
 def from_function(func, input_names, output_names, large_model=False):
     if large_model:
@@ -247,17 +249,23 @@ def _from_saved_model_v1(sess, model_path, input_names, output_names, tag, signa
         # TF1.12 changed the api
         get_signature_def = lambda meta_graph_def, k: meta_graph_def.signature_def[k]
 
-    input_names = []
-    output_names = []
+    inputs = []
+    outputs = []
     for k in signatures:
         inputs_tensor_info = get_signature_def(imported, k).inputs
         for _, input_tensor in inputs_tensor_info.items():
-            input_names.append(input_tensor.name)
+            inputs.append(input_tensor.name)
         outputs_tensor_info = get_signature_def(imported, k).outputs
         for _, output_tensor in outputs_tensor_info.items():
-            output_names.append(output_tensor.name)
-    frozen_graph = freeze_session(sess, input_names=input_names, output_names=output_names)
-    return frozen_graph, input_names, output_names
+            outputs.append(output_tensor.name)
+
+    # override inputs/outputs
+    if input_names:
+        inputs = input_names
+    if output_names:
+        outputs = output_names
+    frozen_graph = freeze_session(sess, input_names=inputs, output_names=outputs)
+    return frozen_graph, inputs, outputs
 
 
 def _remove_non_variable_resources_from_captures(concrete_func):
@@ -342,11 +350,11 @@ def _from_saved_model_v2(model_path, input_names, output_names, tag, signature_d
     inputs = [tensor.name for tensor in concrete_func.inputs if tensor.dtype != tf.dtypes.resource]
     outputs = [tensor.name for tensor in concrete_func.outputs if tensor.dtype != tf.dtypes.resource]
 
-    # filter by user specified inputs/outputs
+    # override inputs/outputs
     if input_names:
-        inputs = list(set(input_names) & set(inputs))
+        inputs = input_names
     if output_names:
-        outputs = list(set(output_names) & set(outputs))
+        outputs = output_names
 
     # Avoid errors due to bug in TF freezing
     removed_resource_to_placeholder, graph_captures_copy, func_captures_copy = \
@@ -364,7 +372,7 @@ def _from_saved_model_v2(model_path, input_names, output_names, tag, signature_d
 
     table_names, key_dtypes, value_dtypes = get_hash_table_info(frozen_graph)
     placeholder_to_table_info = {}
-    if hasattr(imported, '_table') and hasattr(imported._table, '_create_resource'): # pylint: disable=protected-access
+    if hasattr(imported, '_table') and hasattr(imported._table, '_create_resource'):  # pylint: disable=protected-access
         # Add tables from saved_model table initializers
         # pylint: disable=protected-access
         initializer = imported._table._create_resource.concrete_functions[0].function_def
@@ -389,6 +397,7 @@ def _from_saved_model_v2(model_path, input_names, output_names, tag, signature_d
     replace_placeholders_with_tables(frozen_graph, placeholder_to_table_info)
 
     return frozen_graph, inputs, outputs, concrete_func, imported, initialized_tables
+
 
 def from_saved_model(model_path, input_names, output_names, tag=None,
                      signatures=None, concrete_function=None, large_model=False,
@@ -513,8 +522,8 @@ def tf_reload_graph(tf_graph):
     # invoke c api if tf version is below 1.8
     if get_tf_version() < LooseVersion("1.8"):
         logger.debug(
-            "On TF < 1.8, graph is constructed by python API, " \
-            "which doesn't invoke shape inference, please set " \
+            "On TF < 1.8, graph is constructed by python API, "
+            "which doesn't invoke shape inference, please set "
             "TF_C_API_GRAPH_CONSTRUCTION=1 to enable it"
         )
 
