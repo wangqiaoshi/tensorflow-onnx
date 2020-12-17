@@ -16,11 +16,10 @@ import numpy as np
 
 from onnx import onnx_pb
 from onnx.onnx_pb import TensorProto
-from tf2onnx import utils
+from tf2onnx import utils, tf_utils
 from tf2onnx.handler import tf_op
 from tf2onnx.tf_loader import find_function
 from tf2onnx.graph_builder import GraphBuilder
-
 
 logger = logging.getLogger(__name__)
 
@@ -272,37 +271,56 @@ class IfOp:
                           shapes=output_shapes, dtypes=output_dtypes, skip_conversion=True, branches=branches)
 
 
+"""
+先完成
+TensorListSetItem      ->    SequenceInsert
+TensorListGetItem      ->    SequenceAt
+TensorListReserve      ->    SequenceEmpty
+TensorListFromTensor   ->    SequenceConstruct
+TensorListStack        ->    ConcatFromSequence
+"""
+
+
 @tf_op(["TensorListSetItem"])
 class TensorListSetItem:
     @classmethod
-    def version_7(cls, ctx, node, **kwargs):
+    def version_11(cls, ctx, node, **kwargs):
         # handled in 'While'
-        pass
+        # TensorListSetItem input:input_handle,index,item  attr:element_dtype
+        # SequenceInsert  input:   input_sequence,tensor,position(optional)
+        node.type = 'SequenceInsert'
+        ctx.replace_inputs(node, [node.input[0], node[2], node[1]])
 
 
 @tf_op(["TensorListGetItem"])
 class TensorListGetItem:
     @classmethod
-    def version_7(cls, ctx, node, **kwargs):
-        ctx.ta_reads.append(node.input[0])
-        node.type = "Gather"
+    def version_11(cls, ctx, node, **kwargs):
+        # TensorListGetItem  input: input_handle,index,element_shape  attr:element_dtype
+        # SequenceAt     input:input_sequence,position
+        node.type = "SequenceAt"
         ctx.replace_inputs(node, [node.input[0], node.input[1]])
-        ctx.insert_new_node_on_input(node, "Unsqueeze", node.input[1], name=node.child_name(), axes=[0])
-        ctx.insert_new_node_on_output("Squeeze", node.output[0], name=node.child_name(), axes=[0])
-
-    @classmethod
-    def version_13(cls, ctx, node, **kwargs):
-        ctx.ta_reads.append(node.input[0])
-        node.type = "Gather"
-        ctx.replace_inputs(node, [node.input[0], node.input[1]])
-
-        g = GraphBuilder(ctx)
-
-        usq_node = g.make_unsqueeze({"axes": [0], 'name': node.child_name(), 'data': node.input[1]}, return_node=True)
-        ctx.insert_node_on_output(usq_node)
-
-        sq_node = g.make_squeeze({"axes": [0], 'name': node.child_name(), 'data': node.output[0]}, return_node=True)
-        ctx.insert_node_on_output(sq_node)
+    # @classmethod
+    # def version_7(cls, ctx, node, **kwargs):
+    #     ctx.ta_reads.append(node.input[0])
+    #     node.type = "Gather"
+    #     ctx.replace_inputs(node, [node.input[0], node.input[1]])
+    #     ctx.insert_new_node_on_input(node, "Unsqueeze", node.input[1], name=node.child_name(), axes=[0])
+    #     ctx.insert_new_node_on_output("Squeeze", node.output[0], name=node.child_name(), axes=[0])
+    #
+    # @classmethod
+    # def version_13(cls, ctx, node, **kwargs):
+    #     ctx.ta_reads.append(node.input[0])
+    #     node.type = "Gather"
+    #     ctx.replace_inputs(node, [node.input[0], node.input[1]])
+    #
+    #     g = GraphBuilder(ctx)
+    #
+    #     usq_node = g.make_unsqueeze({"axes": [0], 'name': node.child_name(), 'data': node.input[1]}, return_node=True)
+    #     ctx.insert_node_on_output(usq_node)
+    #
+    #     sq_node = g.make_squeeze({"axes": [0], 'name': node.child_name(), 'data': node.output[0]}, return_node=True)
+    #     ctx.insert_node_on_output(sq_node)
 
 
 @tf_op(["TensorListLength"])
@@ -312,22 +330,39 @@ class TensorListLength:
         pass
 
 
-@tf_op(["TensorListReserve", "TensorListResize"])
+@tf_op(["TensorListReserve"])
 class TensorListReserve:
     @classmethod
     def version_7(cls, ctx, node, **kwargs):
+        # TensorListReserve  input:element_shape,num_elements  attr: element_dtype, shape_type
+        # SequenceEmpty     attr: dtype
+        node.type = "SequenceEmpty"
+        tf_dtype = node.get_attr_int("element_dtype")
+        o_dtype = tf_utils.TF_TO_ONNX_DTYPE[tf_dtype]
+        node.set_attr("dtype", o_dtype)
+
+
+# @tf_op(["TensorListFromTensor"])
+# class TensorListFromTensor:
+#     @classmethod
+#     def version_11(cls, ctx, node, **kwargs):
+#         # TensorListFromTensor  input: tensor,element_shape  attr:element_dtype,shape_type
+#         # SequenceConstruct     input: inputs
+#         node.type = "SequenceConstruct"
+#         node.re
+
+
+
+
         pass
 
-
-@tf_op(["TensorListFromTensor"])
-class TensorListFromTensor:
-    @classmethod
-    def version_7(cls, ctx, node, **kwargs):
-        consumers = ctx.find_output_consumers(node.output[0])
-        if any([c.is_while() for c in consumers]):
-            node.type = "Identity"
-            ctx.copy_dtype(node.input[0], node.output[0])
-            ctx.copy_shape(node.input[0], node.output[0])
+    # @classmethod
+    # def version_7(cls, ctx, node, **kwargs):
+    #     consumers = ctx.find_output_consumers(node.output[0])
+    #     if any([c.is_while() for c in consumers]):
+    #         node.type = "Identity"
+    #         ctx.copy_dtype(node.input[0], node.output[0])
+    #         ctx.copy_shape(node.input[0], node.output[0])
 
 
 @tf_op(["TensorListStack"])
